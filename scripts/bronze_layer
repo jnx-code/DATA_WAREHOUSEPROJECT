@@ -1,0 +1,185 @@
+-- create database datawarehouse;
+-- use datawarehouse;
+-- create schema bronze;
+-- create schema silver;
+-- create schema gold;
+
+DELIMITER $$
+create procedure bronze.bronze_setup_tables1()
+BEGIN
+	drop table if exists bronze.crm_cust_info;
+    create table bronze.crm_cust_info(
+        cst_id int,
+        cst_key varchar(50),
+        cst_first_name  varchar(50),
+        cst_last_name  varchar(50),
+        cst_material_status  varchar(50),
+        cst_gndr  varchar(50),
+        cst_create_date date
+    );
+    truncate table  bronze.crm_cust_info;
+    
+	drop table if exists bronze.crm_prd_info;
+    create table bronze.crm_prd_info(
+        prd_id int,
+        prd_key  varchar(50),
+        prd_nm  varchar(50),
+        prd_cost int,
+        prd_line  varchar(50),
+        prd_start_dt datetime,
+        prd_end_dt datetime
+    );
+    truncate table bronze.crm_prd_info;
+
+	drop table if exists bronze.crm_sales_details;
+    create table bronze.crm_sales_details(
+        sls_ord_num  varchar(30),
+        sls_prd_key  varchar(30),
+        sls_cust_id int,
+        sls_order_dt datetime,
+        sls_ship_dt datetime,
+        sls_due_dt datetime,
+        sls_sales int,
+        sls_quantity int,
+        sls_price int
+    );
+    truncate table bronze.crm_sales_details;
+
+	drop table if exists bronze.erp_loc_a101;
+    create table bronze.erp_loc_a101(
+        cid  varchar(50),
+        cntry  varchar(50)
+    );
+    truncate table bronze.erp_loc_a101;
+
+    drop table if exists bronze.erp_cust_az12;
+    create table bronze.erp_cust_az12(
+        cid  varchar(40),
+        bdate datetime,
+        gender  varchar(10)
+    );
+   truncate table bronze.erp_cust_az12;
+    
+	drop table if exists bronze.erp_px_cat_g1v2;
+    create table bronze.erp_px_cat_g1v2(
+        id  varchar(50),
+        cat  varchar(50),
+        subcat  varchar(50),
+        maintanane  varchar(50)
+    );
+    truncate table bronze.erp_px_cat_g1v2;
+end$$
+delimiter ;
+
+truncate table bronze.crm_cust_info;
+LOAD DATA INFILE 'C:/ProgramData/MySQL/MySQL Server 8.0/Uploads/cust_info.csv'
+INTO TABLE bronze.crm_cust_info
+FIELDS TERMINATED BY ','
+ENCLOSED BY '"'
+LINES TERMINATED BY '\n'
+IGNORE 1 ROWS
+(@cst_id, @cst_key, @cst_first_name, @cst_last_name, @cst_material_status, @cst_gndr, @cst_create_date)
+SET
+cst_id = NULLIF(@cst_id, ''),
+cst_key = @cst_key,
+cst_first_name = @cst_first_name,
+cst_last_name = @cst_last_name,
+cst_material_status = @cst_material_status,
+cst_gndr = @cst_gndr,
+cst_create_date = STR_TO_DATE(
+    NULLIF(
+        REPLACE(REPLACE(REPLACE(TRIM(@cst_create_date), '\r', ''), '\n', ''), '\t', ''),
+        ''
+    ),
+    '%Y-%m-%d'
+);
+
+truncate table bronze.crm_prd_info;
+LOAD DATA INFILE 'C:/ProgramData/MySQL/MySQL Server 8.0/Uploads/prd_info.csv'
+INTO TABLE bronze.crm_prd_info
+FIELDS TERMINATED BY ','
+ENCLOSED BY '"'
+LINES TERMINATED BY '\n'
+IGNORE 1 ROWS
+(@prd_id, @prd_key, @prd_nm, @prd_cost, @prd_line, @prd_start_dt, @prd_end_dt)
+SET
+prd_id = NULLIF(@prd_id, ''),
+prd_key = @prd_key,
+prd_nm = @prd_nm,
+prd_cost = nullif(@prd_cost, ''),
+prd_line = @prd_line,
+prd_start_dt = @prd_start_dt,
+prd_end_dt = STR_TO_DATE(
+    NULLIF(
+        REPLACE(REPLACE(REPLACE(TRIM(@prd_end_dt), '\r', ''), '\n', ''), '\t', ''),
+        '' ),'%Y-%m-%d'
+);
+
+TRUNCATE TABLE bronze.crm_sales_details;
+load data infile 'C:/ProgramData/MySQL/MySQL Server 8.0/Uploads/sales_details.csv'
+into table bronze.crm_sales_details
+fields terminated by ','
+enclosed by '"'
+lines terminated by '\n'
+ignore 1 rows
+(@sls_ord_num, @sls_prd_key, @sls_cust_id, @sls_order_dt, @sls_ship_dt, @sls_due_dt, @sls_sales, @sls_quantity, @sls_price)
+set
+    sls_ord_num  = nullif(trim(@sls_ord_num), ''),
+    sls_prd_key  = trim(@sls_prd_key),
+    sls_cust_id  = nullif(trim(@sls_cust_id), ''),
+    sls_order_dt = case 
+                      when trim(@sls_order_dt) regexp '^[0-9]{8}$' then str_to_date(trim(@sls_order_dt), '%Y%m%d')
+                      else null 
+                   end,
+    sls_ship_dt  = case 
+                      when trim(@sls_ship_dt) regexp '^[0-9]{8}$' then str_to_date(trim(@sls_ship_dt), '%Y%m%d')
+                      else null
+                   end,
+    sls_due_dt   = case
+                      when trim(@sls_due_dt) regexp '^[0-9]{8}$' then str_to_date(trim(@sls_due_dt), '%Y%m%d')
+                      else null
+                   end,
+    sls_sales    = nullif(replace(replace(replace(trim(@sls_sales), '\r', ''), '\n', ''), '\t', ''), ''),
+    sls_quantity = nullif(replace(replace(replace(trim(@sls_quantity), '\r', ''), '\n', ''), '\t', ''), ''),
+    sls_price    = nullif(replace(replace(replace(trim(@sls_price), '\r', ''), '\n', ''), '\t', ''), '');
+
+truncate table bronze.erp_cust_az12;
+LOAD DATA INFILE 'C:/ProgramData/MySQL/MySQL Server 8.0/Uploads/CUST_AZ12.csv'
+INTO TABLE bronze.erp_CUST_AZ12
+FIELDS TERMINATED BY ','
+ENCLOSED BY '"'
+LINES TERMINATED BY '\n'
+IGNORE 1 ROWS
+(@cid, @bdate, @gender)
+set
+cid = NULLIF(@cid, ''),
+bdate = @bdate,
+gender = @gender;
+
+
+truncate table bronze.erp_loc_a101;
+LOAD DATA INFILE 'C:/ProgramData/MySQL/MySQL Server 8.0/Uploads/LOC_A101.csv'
+INTO TABLE bronze.erp_loc_a101
+FIELDS TERMINATED BY ','
+ENCLOSED BY '"'
+LINES TERMINATED BY '\n'
+IGNORE 1 ROWS
+(@cid, @cntry)
+set
+cid = NULLIF(@cid, ''),
+cntry = @cntry;
+
+
+truncate table bronze.erp_px_cat_g1v2;
+LOAD DATA INFILE 'C:/ProgramData/MySQL/MySQL Server 8.0/Uploads/PX_CAT_G1V2.csv'
+INTO TABLE bronze.erp_px_cat_g1v2
+FIELDS TERMINATED BY ','
+ENCLOSED BY '"'
+LINES TERMINATED BY '\n'
+IGNORE 1 ROWS
+(@id, @cat,@subcat,@maintanane)
+set
+id = NULLIF(@id, ''),
+cat = @cat,
+subcat = @subcat,
+maintanane = @maintanane;
