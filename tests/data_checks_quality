@@ -1,0 +1,151 @@
+use bronze;
+select * from bronze.crm_cust_info
+limit 1000;
+select * from crm_prd_info
+limit 1000;
+select * from crm_sales_details
+limit 1000;
+select * from erp_CUST_AZ12
+limit 1000;
+select * from erp_loc_a101
+limit 1000;
+select * from erp_px_cat_g1v2
+limit 1000;
+
+
+select cst_id, count(*) from bronze.crm_cust_info
+group by cst_id
+having count(*) > 1 or cst_id is null;
+
+SELECT COUNT(*) AS total_rows, COUNT(DISTINCT prd_id) AS unique_ids
+FROM bronze.crm_prd_info;
+
+-- check for duplicates and null values 
+select * from(
+select *,row_number() over(partition by cst_id order by cst_create_date desc) as flag_last from bronze.crm_cust_info
+) t where flag_last = 1;
+
+-- check for silver
+select * from(
+select *,row_number() over(partition by cst_id order by cst_create_date desc) as flag_last from silver.crm_cust_info
+) t where flag_last != 1;
+
+-- check for unwanted spaces
+select cst_key from bronze.crm_cust_info
+where cst_id != trim(cst_key);
+
+select cst_key from silver.crm_cust_info
+where cst_id = trim(cst_key);
+
+-- data standarization & consitency
+select distinct cst_gndr
+from bronze.crm_cust_info;
+
+-- check for invalid date orders
+
+
+select 
+cst_id as id,
+cst_key ,
+trim(cst_first_name) as firstname,
+trim(cst_last_name) as lastname,
+case when trim(cst_marital_status)  = 'm' then 'married' 
+when trim(cst_marital_status) = 'S' then 'single'
+else 'n/a'
+end cst_material_status ,
+case when trim(cst_gndr) = 'F' then 'female'
+when trim(cst_gndr) = 'M' then 'male'
+else 'n/a'
+end cst_gndr,
+cst_create_date 
+from (select *,row_number() over(partition by cst_id order by cst_create_date desc) as flag_last from bronze.crm_cust_info
+where cst_id is not null
+) t where flag_last = 1;
+
+select * from silver.crm_cust_info;
+
+-- now working on bronze.crm_prd_info
+select 
+prd_id,
+prd_key,
+replace (substring(prd_key,1,5),'-','_') as cat_id,
+substring(prd_key,7,length(prd_key)) as prd_key,
+prd_nm,
+ifnull(prd_cost,0) as prd_cost,
+case when upper(trim(prd_line)) = 'R' then 'red sale'
+when upper(trim(prd_line)) = 'S' then 'sun sale'
+when upper(trim(prd_line)) = 'M' then 'milk sale'
+when upper(trim(prd_line)) = 'T' then 'turning sale'
+else 'n/a'
+end as prd_line,
+cast(prd_start_dt as DATE),
+cast(lead(prd_start_dt) over(partition by prd_key order by prd_start_dt) - 1 as DATE) as prd_end_dt
+from bronze.crm_prd_info;
+
+-- transformation of sales deatils in silver layer 
+select * from bronze.crm_sales_details;
+select sls_ord_num,
+sls_prd_key,
+sls_cust_id,
+sls_order_dt,
+sls_ship_dt,
+sls_due_dt,
+case when sls_sales is null or sls_sales <=0 or sls_sales != sls_quantity * abs(sls_price)
+then sls_quantity * abs(sls_price)
+else sls_sales
+end as sls_sales,
+sls_quantity,
+case when sls_price is null or sls_price <=0
+then sls_sales / nullif(sls_quantity,0)
+else sls_price 
+end as sls_price
+from bronze.crm_sales_details;
+
+select sls_sales,sls_quantity,sls_price from bronze.crm_sales_details
+where sls_sales != sls_quantity*sls_price or sls_sales is null 	or sls_quantity is null or sls_price is null 
+or sls_sales <= 0 or sls_quantity <=0  or sls_price <= 0
+order by sls_sales,sls_quantity,sls_price;
+
+-- transformation into erp_cust_az12
+select * from bronze.erp_cust_az12;
+select 
+case when cid like '%NAS' then substring(cid,4,length(cid))
+else cid
+end as cid,
+case when bdate > current_timestamp() then null 
+else bdate 
+end as bdate,
+gender
+from bronze.erp_cust_az12;
+
+select bdate from bronze.erp_cust_az12
+where bdate < '1924-01-01' or bdate > current_timestamp();
+
+select distinct gender from bronze.erp_cust_az12;
+-- check for inavlid date 
+-- nullif(sls_order_dt,0)
+
+-- transformation of erp_loc_a101
+select * from bronze.erp_loc_a101;
+select distinct cntry from bronze.erp_loc_a101;
+-- in this i have to remove this - from the cid bcz i have to join these table and this isnot match the other tables so 
+select
+replace(cid, '-','') as cid,
+CASE 
+    when upper(trim(replace(replace(replace(cntry, '\r', ''), '\n', ''), '\t', ''))) = 'DE' 
+        THEN 'Germany'
+    when upper(trim(replace(replace(replace(cntry, '\r', ''), '\n', ''), '\t', ''))) in ('US', 'USA') 
+        then 'United States'
+    when trim(cntry) = '' OR cntry is null
+        then 'n/a'
+    else trim(cntry)
+end as country
+from bronze.erp_loc_a101;
+
+-- transformation into erp_px_cat_g1v2
+select * from bronze.erp_px_cat_g1v2;
+
+select distinct id  from bronze.erp_px_cat_g1v2;
+select distinct cat  from bronze.erp_px_cat_g1v2;
+
+
