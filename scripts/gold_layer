@@ -1,0 +1,67 @@
+-- for gold layer 
+-- create customer info
+create view gold.dim_customers as 
+select 
+-- sugrate key 
+  row_number() over(order by cst_id) as customer_key,
+  ci.cst_id as customer_id,
+  ci.cst_key as customer_number,
+  ci.cst_first_name as first_name,
+  ci.cst_last_name as last_name,
+  cl.cntry as country,
+  ci.cst_material_status as marital_status,
+  case when ci.cst_gndr != 'n/a' then ci.cst_gndr
+  else coalesce(ca.gender, 'n/a')
+  end as Gender,
+  ca.bdate as birthdate,
+  ci.cst_create_date as create_date 
+from silver.crm_cust_info as ci
+left join silver.erp_cust_az12 as ca
+ON ci.cst_key = ca.cid
+left join silver.erp_loc_a101 as cl
+on ci.cst_key = cl.cid;
+
+
+-- create product info for final layer gold
+create view gold.dim_products as
+select 
+	row_number() over(order by pn.prd_start_dt, pn.prd_key ) as product_sk,
+	  pn.prd_id as product_id,
+	  pn.prd_key as product_key,
+    pn.prd_cat as category_id,
+    pn.prd_nm as product_name,
+    pc.cat as category,
+    pc.subcat as sub_category,
+    pc.maintanane as maintanence,
+	  pn.prd_cost as cost,
+	  pn.prd_line product_line,
+	  pn.prd_start_dt as start_date
+from silver.crm_prd_info pn
+left join silver.erp_px_cat_g1v2 pc
+on pn.prd_key = pc.id
+where prd_end_dt is null;
+
+
+
+-- creating sales info for gold layer 
+create view gold.fact_sales as
+select 
+  sd.sls_ord_num as order_number,
+  pr.product_key ,
+  cu.customer_key,
+  sd.sls_order_dt as sales_order_date,
+  sd.sls_ship_dt as ship_date,
+  sd.sls_due_dt as due_date,
+  sd.sls_sales as sales,
+  sd.sls_quantity as quantity,
+  sd.sls_price as price
+from silver.crm_sales_details sd
+LEFT JOIN gold.dm_products pr
+  ON sd.sls_prd_key = pr.category_id
+LEFT JOIN gold.dim_customers cu
+  ON sd.sls_cust_id = cu.customer_id;
+
+
+
+
+
