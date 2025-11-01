@@ -1,0 +1,184 @@
+create view gold.customer_reports as
+
+WITH base_query AS (
+    SELECT
+        f.order_number,
+        f.product_key,
+        f.sales_order_date,
+        f.sales,
+        f.quantity,
+        c.customer_key,
+        c.customer_number,
+        CONCAT(c.first_name, ' ', c.last_name) AS customer_name,
+        TIMESTAMPDIFF(YEAR, c.birthdate, CURDATE()) AS age
+    FROM gold.fact_sales f
+    LEFT JOIN gold.dim_customers c
+        ON c.customer_key = f.customer_key 
+    WHERE f.sales_order_date IS NOT NULL
+),
+
+--  Customer-level aggregated data
+customer_aggregation AS (
+    SELECT 
+        customer_key,
+        customer_number,
+        customer_name,
+        age,
+        COUNT(DISTINCT order_number) AS total_orders,
+        SUM(sales) AS total_sales,
+        SUM(quantity) AS total_quantity,
+        COUNT(DISTINCT product_key) AS total_products,
+        MAX(sales_order_date) AS last_order,
+        TIMESTAMPDIFF(MONTH, MIN(sales_order_date), MAX(sales_order_date)) AS lifespan
+    FROM base_query
+    GROUP BY 
+        customer_key,
+        customer_number,
+        customer_name,
+        age
+),
+
+-- Customer spending summary
+customer_spending AS (
+    SELECT 
+        c.customer_key,
+        SUM(f.sales) AS total_spend,
+        MIN(f.sales_order_date) AS first_order,
+        MAX(f.sales_order_date) AS last_order,
+        TIMESTAMPDIFF(MONTH, MIN(f.sales_order_date), MAX(f.sales_order_date)) AS lifespan
+    FROM gold.fact_sales f
+    LEFT JOIN gold.dim_customers c
+        ON f.customer_key = c.customer_key
+    GROUP BY c.customer_key
+),
+
+-- Combine both aggregations
+final_customer_data AS (
+    SELECT 
+        ca.customer_key,
+        ca.customer_number,
+        ca.customer_name,
+        ca.age,
+        ca.total_orders,
+        ca.total_sales,
+        ca.total_quantity,
+        ca.total_products,
+        ca.last_order,
+        ca.lifespan,
+        cs.total_spend
+    FROM customer_aggregation ca
+    LEFT JOIN customer_spending cs 
+        ON ca.customer_key = cs.customer_key
+)
+
+-- Final Output
+SELECT 
+    customer_key,
+    customer_number,
+    customer_name,
+    age,
+    CASE 
+        WHEN age < 20 THEN 'Under 20'
+        WHEN age BETWEEN 20 AND 29 THEN '20-29'
+        WHEN age BETWEEN 30 AND 39 THEN '30-39'
+        WHEN age BETWEEN 40 AND 49 THEN '40-49'
+        ELSE '50 and above'
+    END AS age_group,
+    CASE 
+        WHEN lifespan >= 12 AND total_spend > 5000 THEN 'VIP'
+        WHEN lifespan > 12 AND total_spend <= 5000 THEN 'Regular'
+        ELSE 'New'
+    END AS customer_segment,
+    total_orders,
+    total_sales,
+    total_quantity,
+    total_products,
+    last_order,
+    lifespan,
+    case 
+    when total_orders = 0 then 0
+    else total_sales / total_orders
+    end as avg_order_value,
+    
+-- avg monthly spend
+    case
+    when lifespan = 0 then total_sales
+    else total_sales / lifespan 
+    end as avg_monthly_spend
+FROM final_customer_data
+ORDER BY total_spend DESC;
+
+-- now i have to create view for products
+create view gold.products_report as
+with base_query as (
+select 
+f.order_number,
+f.sales_order_date,
+f.customer_key,
+f.sales,
+f.quantity,
+p.product_key,
+p.product_name,
+p.category,
+p.sub_category,
+p.cost
+from gold.fact_sales f
+left join gold.dm_products p
+on f.product_key = p.product_key
+where sales_order_date is not null
+),
+product_aggregations as (
+select
+product_key,
+product_name,
+category,
+sub_category,
+cost,
+timestampdiff(month,min(sales_order_date),max(sales_order_date)) as lifespan,
+max(sales_order_date) as last_sale_date,
+count(distinct order_number) as total_orders,
+count(distinct customer_key) as total_customers,
+sum(sales) as total_sales,
+sum(quantity) as total_quantity,
+round(avg(cast(sales as float) / nullif(quantity,0)),1) as avg_selling_price
+from base_query
+group by 
+product_key,
+product_name,
+category,
+sub_category,
+cost
+)
+select 
+product_key,
+product_name,
+category,
+sub_category,
+cost,
+last_sale_date,
+timestampdiff(month,last_sale_date, curdate()) as recency_in_months,
+case 
+when total_sales > 5000  then 'high-performer'
+when total_sales >= 10000 then 'mid-performer'
+else 'low-performer'
+end as product_segment,
+lifespan,
+total_orders,
+total_sales,
+total_quantity,
+total_customers,
+avg_selling_price,
+case 
+when total_orders = 0 then 0
+else total_sales / total_orders
+end as avg_order_revenue,
+
+case when lifespan = 0 then total_sales
+else total_sales / lifespan
+end as avg_monthly_revenue
+from product_aggregations;
+
+select * from gold.products_report
+limit 50;
+
+
